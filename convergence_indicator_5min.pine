@@ -1,0 +1,211 @@
+//@version=5
+indicator("收敛预测指标 - 5分钟专版", shorttitle="5分钟收敛", overlay=true, max_boxes_count=100, max_lines_count=100)
+
+// ==================== 5分钟专用参数设置 ====================
+lookback_period = input.int(24, "回看周期(5分钟K线)", minval=12, maxval=48)  // 2-4小时数据
+min_touches = input.int(3, "最少触碰次数", minval=2, maxval=5)
+convergence_threshold = input.float(0.015, "收敛阈值(%)", minval=0.01, maxval=0.03, step=0.005)  // 5分钟适配
+show_prediction_zone = input.bool(true, "显示预测区域")
+show_alerts = input.bool(true, "显示警报")
+sensitivity = input.string("中等", "敏感度", options=["低", "中等", "高"])
+show_multi_timeframe = input.bool(true, "显示多周期确认")
+
+// 5分钟专用敏感度调整
+sens_multiplier = sensitivity == "低" ? 1.3 : sensitivity == "中等" ? 1.0 : 0.8
+
+// ==================== 多周期分析（5分钟优化）====================
+// 获取15分钟和1小时数据进行确认
+higher_tf_trend = request.security(syminfo.tickerid, "15", ta.ema(close, 20) > ta.ema(close, 50))
+hourly_rsi = request.security(syminfo.tickerid, "60", ta.rsi(close, 14))
+
+// ==================== 5分钟专用核心算法 ====================
+
+// 1. 5分钟波动率分析（优化参数）
+atr_5min = ta.atr(12)  // 1小时ATR
+atr_avg_5min = ta.sma(atr_5min, 24)  // 2小时平均
+volatility_ratio_5min = atr_5min / atr_avg_5min
+volatility_declining_5min = ta.falling(volatility_ratio_5min, 4)  // 20分钟趋势
+
+// 2. 5分钟价格区间分析
+price_range_5min = high - low
+range_avg_5min = ta.sma(price_range_5min, 24)  // 2小时平均区间
+range_compression_5min = price_range_5min / range_avg_5min
+range_shrinking_5min = ta.falling(range_compression_5min, 3)  // 15分钟收缩
+
+// 3. 5分钟成交量分析
+volume_avg_5min = ta.sma(volume, 24)  // 2小时成交量均值
+volume_declining_5min = volume < volume_avg_5min * 0.75 and ta.falling(volume, 3)
+
+// 4. 5分钟移动平均收敛
+ema_fast_5min = ta.ema(close, 6)   // 30分钟EMA
+ema_slow_5min = ta.ema(close, 18)  // 1.5小时EMA
+ma_convergence_5min = math.abs(ema_fast_5min - ema_slow_5min) / close * 100
+
+// 5. 5分钟专用关键点识别
+high_point_5min = ta.pivothigh(high, 4, 4)  // 20分钟高点
+low_point_5min = ta.pivotlow(low, 4, 4)    // 20分钟低点
+
+// ==================== 5分钟收敛检测优化 ====================
+detect_convergence_5min() =>
+    convergence_score = 0.0
+    is_converging = false
+    convergence_type = ""
+    estimated_breakout_bars = 0
+    
+    // 波动率收缩检测（5分钟优化）
+    if volatility_declining_5min and volatility_ratio_5min < 0.85
+        convergence_score += 25
+    
+    // 价格区间收缩检测
+    if range_shrinking_5min and range_compression_5min < 0.75
+        convergence_score += 25
+    
+    // 成交量萎缩检测
+    if volume_declining_5min
+        convergence_score += 20
+    
+    // 5分钟价格震荡幅度检测
+    recent_high_5min = ta.highest(high, 12)  // 1小时最高
+    recent_low_5min = ta.lowest(low, 12)     // 1小时最低
+    current_range_pct_5min = (recent_high_5min - recent_low_5min) / close * 100
+    
+    if current_range_pct_5min < 2.5 * sens_multiplier  // 5分钟适配的震荡幅度
+        convergence_score += 15
+    
+    // 移动平均线收敛检测
+    if ma_convergence_5min < 0.8 * sens_multiplier  // 5分钟适配
+        convergence_score += 15
+    
+    // 多周期确认加分
+    if show_multi_timeframe
+        if higher_tf_trend and hourly_rsi > 45 and hourly_rsi < 55  // 15分钟趋势+1小时RSI中性
+            convergence_score += 10
+    
+    // 5分钟专用判断标准
+    if convergence_score >= 65  // 5分钟降低阈值
+        is_converging := true
+        if convergence_score >= 85
+            convergence_type := "强收敛(5分钟)"
+            estimated_breakout_bars := math.round(4 * sens_multiplier)  // 20分钟内突破
+        else
+            convergence_type := "中等收敛(5分钟)"
+            estimated_breakout_bars := math.round(6 * sens_multiplier)  // 30分钟内突破
+    
+    [is_converging, convergence_score, convergence_type, estimated_breakout_bars]
+
+// ==================== 5分钟突破方向预测优化 ====================
+predict_breakout_direction_5min() =>
+    direction_score = 0.0
+    predicted_direction = "未知"
+    
+    // 5分钟RSI分析
+    rsi_5min = ta.rsi(close, 12)  // 1小时RSI
+    if rsi_5min > 58
+        direction_score += 1.2
+    else if rsi_5min < 42
+        direction_score -= 1.2
+    
+    // 5分钟MACD分析
+    [macd_line_5min, signal_5min, _] = ta.macd(close, 10, 21, 7)  // 5分钟优化参数
+    if macd_line_5min > signal_5min
+        direction_score += 1.0
+    else
+        direction_score -= 1.0
+    
+    // 5分钟成交量价格关系
+    if close > open and volume > volume_avg_5min
+        direction_score += 0.8
+    else if close < open and volume > volume_avg_5min
+        direction_score -= 0.8
+    
+    // 5分钟布林带位置
+    bb_upper_5min = ta.sma(close, 20) + 1.8 * ta.stdev(close, 20)  // 5分钟调整
+    bb_lower_5min = ta.sma(close, 20) - 1.8 * ta.stdev(close, 20)
+    bb_position_5min = (close - bb_lower_5min) / (bb_upper_5min - bb_lower_5min)
+    
+    if bb_position_5min > 0.65
+        direction_score += 0.6
+    else if bb_position_5min < 0.35
+        direction_score -= 0.6
+    
+    // 多周期确认
+    if show_multi_timeframe and higher_tf_trend
+        direction_score += 0.5
+    else if show_multi_timeframe and not higher_tf_trend
+        direction_score -= 0.5
+    
+    // 5分钟专用方向判断
+    if direction_score >= 1.8
+        predicted_direction := "向上突破(5分钟)"
+    else if direction_score <= -1.8
+        predicted_direction := "向下突破(5分钟)"
+    else
+        predicted_direction := "方向待定(5分钟)"
+    
+    [predicted_direction, math.abs(direction_score)]
+
+// ==================== 主要执行逻辑 ====================
+[is_converging_5min, conv_score_5min, conv_type_5min, breakout_bars_5min] = detect_convergence_5min()
+[breakout_direction_5min, direction_confidence_5min] = predict_breakout_direction_5min()
+
+// ==================== 5分钟专用视觉显示 ====================
+
+// 5分钟收敛区域标记
+if is_converging_5min and show_prediction_zone
+    // 绘制5分钟收敛框
+    convergence_box_5min = box.new(left=bar_index - 3, top=high * 1.008, right=bar_index + breakout_bars_5min, bottom=low * 0.992, bgcolor=conv_score_5min >= 85 ? color.new(color.red, 88) : color.new(color.orange, 88), border_color=conv_score_5min >= 85 ? color.red : color.orange, border_width=2)
+    
+    // 5分钟信息标签
+    label.new(
+      x=bar_index,
+      y=high,
+      text="📊 " + conv_type_5min + "\n🎯 " + breakout_direction_5min + "\n📈 评分:" + str.tostring(conv_score_5min, "#") + "/100\n⏰ 预计" + str.tostring(breakout_bars_5min) + "根K线后突破",
+      style=label.style_label_down,
+      color=conv_score_5min >= 85 ? color.red : color.orange,
+      textcolor=color.white,
+      size=size.normal)
+
+// 5分钟预测突破线
+if is_converging_5min and breakout_direction_5min != "方向待定(5分钟)"
+    future_price_5min = breakout_direction_5min == "向上突破(5分钟)" ? high * 1.015 : low * 0.985
+    line.new(
+      x1=bar_index,
+      y1=close,
+      x2=bar_index + breakout_bars_5min,
+      y2=future_price_5min,
+      color=breakout_direction_5min == "向上突破(5分钟)" ? color.lime : color.red,
+      width=3,
+      style=line.style_dashed)
+
+// ==================== 5分钟专用警报 ====================
+if is_converging_5min and show_alerts
+    if conv_score_5min >= 85
+        alert("🔥 5分钟强收敛信号！预计" + str.tostring(breakout_bars_5min * 5) + "分钟后突破，方向：" + breakout_direction_5min, alert.freq_once_per_bar)
+    else if conv_score_5min >= 65
+        alert("⚠️ 5分钟收敛信号检测到，预计" + str.tostring(breakout_bars_5min * 5) + "分钟后突破", alert.freq_once_per_bar)
+
+// ==================== 5分钟数据表格 ====================
+if barstate.islast and is_converging_5min
+    var table info_table_5min = table.new(position.top_right, 2, 7, bgcolor=color.white, border_width=1)
+    table.cell(info_table_5min, 0, 0, "5分钟收敛分析", text_color=color.white, bgcolor=color.blue)
+    table.cell(info_table_5min, 1, 0, "", text_color=color.black, bgcolor=color.blue)
+    table.cell(info_table_5min, 0, 1, "收敛类型", text_color=color.black)
+    table.cell(info_table_5min, 1, 1, conv_type_5min, text_color=color.black)
+    table.cell(info_table_5min, 0, 2, "收敛评分", text_color=color.black)
+    table.cell(info_table_5min, 1, 2, str.tostring(conv_score_5min, "#") + "/100", text_color=color.black)
+    table.cell(info_table_5min, 0, 3, "预测方向", text_color=color.black)
+    table.cell(info_table_5min, 1, 3, breakout_direction_5min, text_color=color.black)
+    table.cell(info_table_5min, 0, 4, "预计突破时间", text_color=color.black)
+    table.cell(info_table_5min, 1, 4, str.tostring(breakout_bars_5min * 5) + "分钟后", text_color=color.black)
+    table.cell(info_table_5min, 0, 5, "方向置信度", text_color=color.black)
+    table.cell(info_table_5min, 1, 5, str.tostring(direction_confidence_5min * 25, "#") + "%", text_color=color.black)
+    table.cell(info_table_5min, 0, 6, "多周期确认", text_color=color.black)
+    table.cell(info_table_5min, 1, 6, higher_tf_trend ? "✅ 趋势一致" : "❌ 趋势分歧", text_color=color.black)
+
+// 5分钟收敛强度图标
+plotchar(is_converging_5min and conv_score_5min >= 85, "5分钟强收敛", "🔥", location.abovebar, color.red, size=size.normal)
+plotchar(is_converging_5min and conv_score_5min >= 65 and conv_score_5min < 85, "5分钟中等收敛", "⚠️", location.abovebar, color.orange, size=size.small)
+
+// 背景颜色提示（5分钟专用）
+bgcolor(is_converging_5min and conv_score_5min >= 85 ? color.new(color.red, 95) : 
+        is_converging_5min and conv_score_5min >= 65 ? color.new(color.orange, 95) : na)
